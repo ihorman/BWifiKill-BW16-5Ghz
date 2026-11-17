@@ -1132,6 +1132,12 @@ void runDeauthLab() {
   uiDrawPrincipalTest(labTestGetReport());
 }
 
+static volatile bool labStopLatched = false;
+
+void labStopIsr() {
+  labStopLatched = true;
+}
+
 bool runPacketInjectionLab(const NetworkInfo &target) {
   labInjectionStoppedByUser = false;
 
@@ -1163,6 +1169,9 @@ bool runPacketInjectionLab(const NetworkInfo &target) {
 
   uiDrawStatus("OK detiene");
   waitForLabButtonsReleased();
+
+  labStopLatched = false;
+  attachInterrupt(digitalPinToInterrupt(BTN_OK), labStopIsr, FALLING);
 
   bool anySent = false;
   uint32_t sentCount = 0;
@@ -1197,6 +1206,7 @@ bool runPacketInjectionLab(const NetworkInfo &target) {
       Serial.println("[LAB] No se pudo rearmar WiFi; prueba detenida.");
       uiDrawStatus("WiFi rearm fallo");
       delay(900);
+      detachInterrupt(digitalPinToInterrupt(BTN_OK));
       return anySent;
     }
   }
@@ -1228,6 +1238,8 @@ bool rearmLabWifi(uint8_t channel) {
 }
 
 bool stopPacketInjectionLab(bool anySent, uint32_t sentCount) {
+  detachInterrupt(digitalPinToInterrupt(BTN_OK));
+  labStopLatched = false;
   labInjectionStoppedByUser = true;
   Serial.println("[LAB] Packet injection detenida por boton.");
   Serial.print("[LAB] Total frames OK: ");
@@ -1256,11 +1268,15 @@ void returnToDeauthCaller(UiState returnState) {
 }
 
 bool labStopRequested() {
+  if (labStopLatched) {
+    return true;
+  }
+
   if (digitalRead(BTN_OK) != LOW) {
     return false;
   }
 
-  delay(220);
+  delay(30);
   return digitalRead(BTN_OK) == LOW;
 }
 

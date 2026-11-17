@@ -14,7 +14,9 @@ bool wifi_tx_raw_frame(const void* frame, size_t length) {
   }
 
   uint8_t *ptr = (uint8_t *)**wlan_info_ptr;
-  uint8_t *frame_control = (uint8_t *)alloc_mgtxmitframe(ptr + 0xa80);
+  // alloc_mgtxmitframe() takes the adapter's xmit-priv at +0xAE0 (verified against
+  // issue_deauth in rtw_mlme_ext.o, lib_wlan.a AmebaD 3.1.7). The public PoC's 0xa80 is a typo.
+  uint8_t *frame_control = (uint8_t *)alloc_mgtxmitframe(ptr + 0xae0);
 
   if (frame_control != 0) {
     update_mgntframe_attrib(ptr, frame_control + 8);
