@@ -1134,12 +1134,31 @@ void runDeauthLab() {
 
 static volatile bool labStopLatched = false;
 
+// Attach-once interrupt lifecycle: detachInterrupt() + re-attach after re-entry
+// wedges the GPIO (BTN_OK wedge after the 2nd detach cycle). The ISR is attached
+// once behind this guard and never detached; the latch above consumes the stop.
+static bool labStopIsrAttached = false;
+
+// Idempotent WiFi bring-up (Evil-BW16 proven pattern): the closed AmebaD WLAN
+// blob hard-deadlocks when wifi_off()/wifi_on() churn is mixed with real
+// UI/stop traffic (run-2 hang right after [LAB] loop start). Each run does ONE
+// cold bring-up in a clean window (labWifiUp is reset at run entry); in-run
+// cycle hops only move the channel.
+static bool labWifiUp = false;
+
+// wifi_disable_powersave() is declared by the Realtek SDK headers (via
+// WifiScanner.h) - do not redeclare it here.
+
 void labStopIsr() {
   labStopLatched = true;
 }
 
 bool runPacketInjectionLab(const NetworkInfo &target) {
   labInjectionStoppedByUser = false;
+  // Every run cold-starts WiFi: with labWifiUp left true from a previous run
+  // the first rearm takes the channel-hop fast path on an already-used driver
+  // and wedges mgnt-TX at the first frame of the run (run-2 hang).
+  labWifiUp = false;
 
   if (isInjectionBlockedSecurity(target.security)) {
     Serial.println("[LAB] Packet injection omitida: PMF/WPA3 probable.");
@@ -1171,7 +1190,10 @@ bool runPacketInjectionLab(const NetworkInfo &target) {
   waitForLabButtonsReleased();
 
   labStopLatched = false;
-  attachInterrupt(digitalPinToInterrupt(BTN_OK), labStopIsr, FALLING);
+  if (!labStopIsrAttached) {
+    attachInterrupt(digitalPinToInterrupt(BTN_OK), labStopIsr, FALLING);
+    labStopIsrAttached = true;
+  }
 
   bool anySent = false;
   uint32_t sentCount = 0;
@@ -1206,39 +1228,52 @@ bool runPacketInjectionLab(const NetworkInfo &target) {
       Serial.println("[LAB] No se pudo rearmar WiFi; prueba detenida.");
       uiDrawStatus("WiFi rearm fallo");
       delay(900);
-      detachInterrupt(digitalPinToInterrupt(BTN_OK));
       return anySent;
     }
   }
 }
 
 bool rearmLabWifi(uint8_t channel) {
-  uiDrawStatus("Rearmando WiFi...");
-  wifi_off();
-  delay(220);
+  if (!labWifiUp) {
+    Serial.println("[LAB] rearm bring-up");
+    uiDrawStatus("Rearmando WiFi...");
+    delay(50);
+    wifi_off();
+    delay(220);
 
-  if (wifi_on(RTW_MODE_STA) != RTW_SUCCESS) {
-    Serial.println("[LAB] wifi_on fallo.");
-    uiDrawStatus("WiFi on fallo");
-    delay(300);
-    return false;
+    if (wifi_on(RTW_MODE_STA) != RTW_SUCCESS) {
+      labWifiUp = false;
+      Serial.println("[LAB] wifi_on fallo.");
+      uiDrawStatus("WiFi on fallo");
+      delay(300);
+      return false;
+    }
+
+    delay(240);
+    labWifiUp = true;
+    Serial.println("[LAB] WiFi up, LPS off");
   }
 
-  delay(240);
+  // LPS (power save) is disabled for good: a MAC waking from power-save is what
+  // wedges mgnt-TX on later runs - do not re-enable. Cheap, so run it before
+  // every attack run/hop as well.
+  wifi_disable_powersave();
   uiDrawStatus("Fijando canal...");
-  if (wifi_set_channel(channel) != RTW_SUCCESS) {
-    Serial.println("[LAB] No se pudo fijar el canal objetivo.");
-    uiDrawStatus("Canal fallo");
-    delay(120);
-    return false;
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    if (wifi_set_channel(channel) == RTW_SUCCESS) {
+      delay(90);
+      return true;
+    }
+    delay(200);
   }
 
-  delay(90);
-  return true;
+  Serial.println("[LAB] No se pudo fijar el canal objetivo.");
+  uiDrawStatus("Canal fallo");
+  delay(120);
+  return false;
 }
 
 bool stopPacketInjectionLab(bool anySent, uint32_t sentCount) {
-  detachInterrupt(digitalPinToInterrupt(BTN_OK));
   labStopLatched = false;
   labInjectionStoppedByUser = true;
   Serial.println("[LAB] Packet injection detenida por boton.");
