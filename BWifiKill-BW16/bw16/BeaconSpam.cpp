@@ -139,13 +139,9 @@ bool beaconSpamStart(uint8_t band) {
   stats.startedAt = millis();
   hopIdx = 0;
 
-  wifi_off();
-  delay(150);
-  if (wifi_on(RTW_MODE_STA) != RTW_SUCCESS) {
-    stats.active = false;
-    return false;
-  }
-  delay(200);
+  // Keep the WiFi session (churn wedge class) - just settle and set the channel.
+  wifi_disable_powersave();
+  delay(50);
 
   stats.currentChannel = (stats.band == 5) ? CHANNELS_5[0] : CHANNELS_24[0];
   if (wifi_set_channel(stats.currentChannel) != RTW_SUCCESS) {
@@ -161,10 +157,8 @@ bool beaconSpamStart(uint8_t band) {
 
 void beaconSpamStop() {
   stats.active = false;
-  wifi_off();
+  // Keep the WiFi session (churn wedge class) - nothing to unwind here.
   delay(100);
-  wifi_on(RTW_MODE_STA);
-  delay(150);
 }
 
 void beaconSpamTick() {

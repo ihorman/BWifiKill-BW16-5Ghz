@@ -114,13 +114,9 @@ bool sniffStart(uint8_t band) {
   stats.active = true;
   stats.startedAt = millis();
 
-  wifi_off();
-  delay(150);
-  if (wifi_on(RTW_MODE_STA) != RTW_SUCCESS) {
-    stats.active = false;
-    return false;
-  }
-  delay(200);
+  // Keep the WiFi session (churn wedge class) - just settle and start hopping.
+  wifi_disable_powersave();
+  delay(50);
 
   hopIdx = 0;
   stats.currentChannel = (stats.band == 5) ? HOP_CHANNELS_5[0] : HOP_CHANNELS_24[0];
@@ -138,10 +134,8 @@ void sniffStop() {
   wifi_set_promisc(RTW_PROMISC_DISABLE, NULL, 0);
   stats.active = false;
 
-  wifi_off();
+  // Keep the WiFi session (churn wedge class) - nothing to unwind here.
   delay(100);
-  wifi_on(RTW_MODE_STA);
-  delay(150);
 }
 
 void sniffTick() {
